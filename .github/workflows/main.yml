@@ -17,20 +17,21 @@ jobs:
     - name: Fetch APNIC data and generate ROS script
       run: |
         echo "正在从 APNIC 官方 HTTPS 源获取最新的 IP 数据..."
-        # 【修改这里】改用官方的 HTTPS 镜像源，并增加 -L（追踪重定向）和 -f（失败时报错）参数
         curl -s -L -f https://ftp.apnic.net/stats/apnic/delegated-apnic-latest > apnic.txt
         
-        echo "开始解析并生成 RouterOS 脚本..."
-        # 初始化 .rsc 文件头部内容
-        echo "/ip firewall address-list remove [/ip firewall address-list find list=CN]" > china_ip.rsc
-        echo "/ip firewall address-list" >> china_ip.rsc
+        echo "开始解析并生成特定格式的 RouterOS 脚本..."
         
-        # 过滤出中国大陆的 IPv4 地址并转换为标准的 ROS 命令行格式
+        # 1. 初始化头部内容（打印日志，并清空旧的 CN 列表）
+        echo '/log info "Loading CN ipv4 address list"' > china_ip.rsc
+        echo '/ip firewall address-list remove [/ip firewall address-list find list=CN]' >> china_ip.rsc
+        echo '/ip firewall address-list' >> china_ip.rsc
+        
+        # 2. 过滤出中国大陆的 IPv4 地址，计算掩码，并严格按照 :do { add address=... list=CN } on-error={} 格式输出
         awk -F'|' '/apnic\|CN\|ipv4/ {
             ip = $4;
             count = $5;
             mask = 32 - log(count)/log(2);
-            printf "add list=CN address=%s/%d\n", ip, mask
+            printf ":do { add address=%s/%d list=CN } on-error={}\n", ip, mask
         }' apnic.txt >> china_ip.rsc
         
         # 清理临时文件
@@ -42,5 +43,5 @@ jobs:
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git add china_ip.rsc
-        git diff-index --quiet HEAD || git commit -m "自动更新中国 IP 列表 (基于 APNIC 官方数据)"
+        git diff-index --quiet HEAD || git commit -m "自动更新中国 IP 列表 (指定格式容错版)"
         git push
