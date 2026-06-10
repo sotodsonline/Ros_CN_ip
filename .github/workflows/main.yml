@@ -1,0 +1,45 @@
+name: Generate RouterOS China IP List
+
+on:
+  schedule:
+    # 每天北京时间凌晨 4:00 自动运行 (UTC 时间 20:00)
+    - cron: '0 20 * * *'
+  workflow_dispatch: # 允许你在网页上点击按钮手动触发更新
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Fetch APNIC data and generate ROS script
+      run: |
+        echo "正在从 APNIC 官方获取最新的 IP 数据..."
+        curl -s ftp://ftp.apnic.net/stats/apnic/delegated-apnic-latest > apnic.txt
+        
+        # 初始化 .rsc 文件头部内容（清空旧列表，定义新列表）
+        echo "/ip firewall address-list remove [/ip firewall address-list find list=CN]" > china_ip.rsc
+        echo "/ip firewall address-list" >> china_ip.rsc
+        
+        # 过滤出中国大陆的 IPv4 地址，计算掩码并转换为标准的 ROS 命令行格式
+        awk -F'|' '/apnic\|CN\|ipv4/ {
+            ip = $4;
+            count = $5;
+            mask = 32 - log(count)/log(2);
+            printf "add list=CN address=%s/%d\n", ip, mask
+        }' apnic.txt >> china_ip.rsc
+        
+        # 清理临时文件
+        rm apnic.txt
+        echo "ROS 脚本生成完毕！"
+
+    - name: Commit and push if changed
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add china_ip.rsc
+        # 只有在文件有变动时才提交，防止刷无意义的 commit
+        git diff-index --quiet HEAD || git commit -m "自动更新中国 IP 列表 (基于 APNIC 官方数据)"
+        git push
